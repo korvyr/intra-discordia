@@ -160,12 +160,13 @@ func main() {
 	gs := s.State.Guilds
 	// iterate through each guild
 	for _, g := range gs {
-
+		
 	}
 	// pass session its handlers
 	s.AddHandler(joinHandler)
 	s.AddHandler(leaveHandler)
 	s.AddHandler(msgHandler)
+	s.AddHandler(reactionHandler)
 	log.Println("Bot listening...")
 	// update status
 	s.UpdateStatus(0, "| ?help")
@@ -175,250 +176,16 @@ func main() {
 	<-sc
 }
 
-func jukebox(s *discordgo.Session, g *discordgo.Guild) {
-	cs, e := s.GuildChannels(g.ID)
-	if e != nil {
-		trace(e)
-		return
-	}
-	cID := ""
-	for _, c := range cs {
-		if strings.ToLower(c.Name) == "jukebox" {
-			cID = c.ID
-		}
-	}
-	if cID == "" {
-		trace(errors.New("no jukebox channel found"))
-		return
-	}
-	v, e := s.ChannelVoiceJoin(g.ID, cID, false, true)
-	if e == nil {
-		// clean out any old connections
-		v.Speaking(false)
-		v.Disconnect()
-		v.Close()
-	}
-	v, e = s.ChannelVoiceJoin(g.ID, cID, false, true)
-	if e != nil {
-		trace(e)
-		return
-	}
-	stop := make(chan bool)
-	var que []string
-	for ctl := range jbControl {
-		cmd := strings.Split(ctl, " ")
-		if cmd[0] == "play" {
-			if len(cmd) < 2 {
-				trace(errors.New("jbControl play: missing link"))
-				continue
-			}
-			link := cmd[1]
-			select {
-			case stop <- false:
-				que = append(que, link)
-			default:
-				go func() {
-					dgvoice.PlayAudioFile(v, link, stop)
-					jbControl <- "done"
-				}()
-			}
-			continue
-		}
-		if cmd[0] == "stop" {
-			que = []string{}
-			jbPlaylist = []string{}
-			jbSkip = []string{}
-			select {
-			case stop <- true:
-			default:
-			}
-			continue
-		}
-		if cmd[0] == "next" {
-			select {
-			case stop <- true:
-			default:
-			}
-			continue
-		}
-		if cmd[0] == "reset" {
-			v.Disconnect()
-			v.Close()
-			v, e = s.ChannelVoiceJoin(g.ID, cID, false, true)
-			if e != nil {
-				trace(e)
-				continue
-			}
-			go func() {
-				jbControl <- "done"
-			}()
-			continue
-		}
-		if cmd[0] == "done" {
-			if runtime.GOOS == "linux" {
-				kill := exec.Command("killall", "ffmpeg")
-				_ = kill.Run
-			}
-			select {
-			case stop <- true:
-			default:
-			}
-			jbPlaylist = remFirst(jbPlaylist)
-			jbSkip = []string{}
-			link := ""
-			if len(que) > 0 {
-				link = que[0]
-			}
-			que = remFirst(que)
-			if link == "" {
-				continue
-			}
-			go func() {
-				dgvoice.PlayAudioFile(v, link, stop)
-				jbControl <- "done"
-			}()
-			continue
-		}
-	}
-}
-
-// autonomous actions
-func heartbeat(s *discordgo.Session, g *discordgo.Guild) {
-	tk := time.NewTicker(time.Minute * 1)
-	for t := range tk.C {
-		// set time to est
-		now := t.In(timeZone)
-		// init times
-		hrago := now.Add(-time.Hour)
-		hrlater := now.Add(time.Hour)
-		// map roles and mentions
-		role := make(map[string]string)
-		rm := make(map[string]string)
-		rs, e := s.GuildRoles(g.ID)
-		if e != nil {
-			continue
-		}
-		for _, r := range rs {
-			role[r.Name] = r.ID
-			rm[r.Name] = "<@&" + r.ID + "> "
-		}
-		// map channels
-		channel := make(map[string]string)
-		cs, e := s.GuildChannels(g.ID)
-		if e != nil {
-			continue
-		}
-		for _, c := range cs {
-			channel[c.Name] = c.ID
-		}
-
-		// user message count ticker
-		for k, v := range userMute {
-			if v > 0 {
-				userMute[k]--
-			}
-		}
-
-		// clean out beeps
-		go cleanBeeps(s, g)
-
-		// clean out things voted bad
-		go cleanTrash(s, g)
-
-		// load events
-		evts, e := getEvents()
-		if e == nil {
-			// iterate through and check times
-			for id, evt := range evts {
-				// skip edits
-				if evt["status"] == "edit" {
-					continue
-				}
-				// parse time
-				te, e := time.ParseInLocation(timeLayout, evt["when"], timeZone)
-				if e != nil {
-					continue
-				}
-				if te.Before(hrago) {
-					switch evt["often"] {
-					case "once":
-						sqlDeleteWithInt("events", "id", id)
-						continue
-					case "weekly":
-						sqlUpdateWithInt("events", "datetime", te.AddDate(0, 0, 7).Format(timeLayout), "id", id)
-						sqlUpdateWithInt("events", "warned", "false", "id", id)
-						sqlUpdateWithInt("events", "now", "false", "id", id)
-						continue
-					case "monthly":
-						sqlUpdateWithInt("events", "datetime", te.AddDate(0, 1, 0).Format(timeLayout), "id", id)
-						sqlUpdateWithInt("events", "warned", "false", "id", id)
-						sqlUpdateWithInt("events", "now", "false", "id", id)
-						continue
-					}
-				}
-				if te.Before(hrlater) && evt["warned"] != "true" {
-					go s.ChannelMessageSend(channel["announcements"], rm["Officers"]+rm["NCOs"]+rm["Enlisted"]+evt["name"]+" is starting in about an hour! Prepare yourselves!")
-					sqlUpdateWithInt("events", "warned", "true", "id", id)
-				}
-				if te.Before(now.Add(time.Minute*10)) && evt["now"] != "true" {
-					go s.ChannelMessageSend(channel["announcements"], rm["Officers"]+rm["NCOs"]+rm["Enlisted"]+evt["name"]+" is starting shortly! Please make your way over to the events channels and join the server if you wish to participate!\n\nServer Info: "+evt["server"])
-					sqlUpdateWithInt("events", "now", "true", "id", id)
-				}
-			}
-		}
-
-		// display events in schedule channel
-		sch, e := s.ChannelMessages(channel["schedule"], 100, "", "", "")
-		if e == nil {
-			timeLast := time.Now().Add(-time.Hour * 24)
-			for _, m := range sch {
-				nid, nevt := nextEvent(timeLast)
-				if nid == -1 {
-					go s.ChannelMessageDelete(channel["schedule"], m.ID)
-					continue
-				}
-				timeLast, e = time.ParseInLocation(timeLayout, nevt["when"], timeZone)
-				if e != nil {
-					continue
-				}
-				str := "\n..." +
-					"\n\nEvent: **" + nevt["name"] + "**" +
-					timesInZones(timeLast) +
-					"\n\nInfo: " + nevt["info"] +
-					"\n"
-				go s.ChannelMessageEdit(channel["schedule"], m.ID, str)
-			}
-			for {
-				nid, nevt := nextEvent(timeLast)
-				if nid == -1 {
-					break
-				}
-				timeLast, e = time.ParseInLocation(timeLayout, nevt["when"], timeZone)
-				go s.ChannelMessageSend(channel["schedule"], "...")
-			}
-		}
-
-		// iterate through voice states for xp
-		for _, vs := range g.VoiceStates {
-			if !vs.SelfDeaf && !vs.SelfMute && !vs.Deaf && !vs.Mute {
-				mbr, e := s.GuildMember(vs.GuildID, vs.UserID)
-				if e == nil {
-					go updateProfile(mbr, 1)
-				}
-			}
-		}
-
-		// set rub's nickname
-		go s.GuildMemberNickname(g.ID, "220954470446661632", "77th | Col | rubadubdub")
-	}
+func reactionHandler(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
+	
 }
 
 // handles new members
-func joinHandler(s *discordgo.Session, n *discordgo.GuildMemberAdd) {
+func joinHandler(s *discordgo.Session, m *discordgo.GuildMemberAdd) {
 	// get guild
-	g, e := s.State.Guild(n.GuildID)
+	g, e := s.State.Guild(m.GuildID)
 	if e != nil {
-		g, e = s.Guild(n.GuildID)
+		g, e = s.Guild(m.GuildID)
 		if e != nil {
 			return
 		}
