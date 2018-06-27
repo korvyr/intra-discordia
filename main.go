@@ -37,100 +37,8 @@ const (
 
 var (
 	db *sql.DB
+	gs []*discordgo.Guild
 )
-
-type ddgResult struct {
-	Answer           string      `json:"Answer"`
-	Heading          string      `json:"Heading"`
-	ImageWidth       interface{} `json:"ImageWidth"`
-	Entity           string      `json:"Entity"`
-	Type             string      `json:"Type"`
-	DefinitionSource string      `json:"DefinitionSource"`
-	ImageHeight      interface{} `json:"ImageHeight"`
-	Infobox          interface{} `json:"Infobox"`
-	AbstractSource   string      `json:"AbstractSource"`
-	AnswerType       string      `json:"AnswerType"`
-	RelatedTopics    []struct {
-		FirstURL string `json:"FirstURL"`
-		Result   string `json:"Result"`
-		Text     string `json:"Text"`
-		Icon     struct {
-			Width  string `json:"Width"`
-			URL    string `json:"URL"`
-			Height string `json:"Height"`
-		} `json:"Icon"`
-	} `json:"RelatedTopics"`
-	Redirect string `json:"Redirect"`
-	Results  []struct {
-		Result   string `json:"Result"`
-		FirstURL string `json:"FirstURL"`
-		Text     string `json:"Text"`
-		Icon     struct {
-			Width  int    `json:"Width"`
-			URL    string `json:"URL"`
-			Height int    `json:"Height"`
-		} `json:"Icon"`
-	} `json:"Results"`
-	Meta struct {
-		JsCallbackName string      `json:"js_callback_name"`
-		Blockgroup     interface{} `json:"blockgroup"`
-		DevDate        interface{} `json:"dev_date"`
-		SrcOptions     struct {
-			SourceSkip        string `json:"source_skip"`
-			IsMediawiki       int    `json:"is_mediawiki"`
-			SkipEnd           string `json:"skip_end"`
-			IsFanon           int    `json:"is_fanon"`
-			SkipIcon          int    `json:"skip_icon"`
-			Language          string `json:"language"`
-			SrcInfo           string `json:"src_info"`
-			SkipImageName     int    `json:"skip_image_name"`
-			Directory         string `json:"directory"`
-			SkipAbstract      int    `json:"skip_abstract"`
-			IsWikipedia       int    `json:"is_wikipedia"`
-			MinAbstractLength string `json:"min_abstract_length"`
-			SkipAbstractParen int    `json:"skip_abstract_paren"`
-			SkipQr            string `json:"skip_qr"`
-		} `json:"src_options"`
-		SrcID           int         `json:"src_id"`
-		Producer        interface{} `json:"producer"`
-		SrcURL          interface{} `json:"src_url"`
-		IsStackexchange interface{} `json:"is_stackexchange"`
-		Maintainer      struct {
-			Github string `json:"github"`
-		} `json:"maintainer"`
-		DevMilestone    string      `json:"dev_milestone"`
-		PerlModule      string      `json:"perl_module"`
-		Unsafe          int         `json:"unsafe"`
-		ProductionState string      `json:"production_state"`
-		Status          string      `json:"status"`
-		Designer        interface{} `json:"designer"`
-		Tab             string      `json:"tab"`
-		Repo            string      `json:"repo"`
-		Attribution     interface{} `json:"attribution"`
-		Topic           []string    `json:"topic"`
-		Developer       []struct {
-			Type string `json:"type"`
-			URL  string `json:"url"`
-			Name string `json:"name"`
-		} `json:"developer"`
-		Name         string      `json:"name"`
-		SrcName      string      `json:"src_name"`
-		SignalFrom   string      `json:"signal_from"`
-		SrcDomain    string      `json:"src_domain"`
-		ExampleQuery string      `json:"example_query"`
-		CreatedDate  interface{} `json:"created_date"`
-		LiveDate     interface{} `json:"live_date"`
-		ID           string      `json:"id"`
-		Description  string      `json:"description"`
-	} `json:"meta"`
-	AbstractURL   string      `json:"AbstractURL"`
-	Abstract      string      `json:"Abstract"`
-	AbstractText  string      `json:"AbstractText"`
-	DefinitionURL string      `json:"DefinitionURL"`
-	Definition    string      `json:"Definition"`
-	Image         string      `json:"Image"`
-	ImageIsLogo   interface{} `json:"ImageIsLogo"`
-}
 
 func main() {
 	// slurp up the token
@@ -157,11 +65,7 @@ func main() {
 	}
 	log.Println("Bot online...")
 	// get connected guilds
-	gs := s.State.Guilds
-	// iterate through each guild
-	for _, g := range gs {
-		
-	}
+	gs = s.State.Guilds
 	// pass session its handlers
 	s.AddHandler(joinHandler)
 	s.AddHandler(leaveHandler)
@@ -177,7 +81,28 @@ func main() {
 }
 
 func reactionHandler(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
-	
+	// get channel
+	c, e := s.State.Channel(r.ChannelID)
+	if e != nil {
+		c, e = s.Channel(r.ChannelID)
+		if e != nil {
+			trace(e)
+			return
+		}
+	}
+	// get guild
+	g, e := s.Guild(c.GuildID)
+	if e != nil {
+		trace(e)
+		return
+	}
+	// get message
+	m, e := s.ChannelMessage(c.ID, r.MessageID)
+	if e != nil {
+		trace(e)
+		return
+	}
+	// evaluate validity
 }
 
 // handles new members
